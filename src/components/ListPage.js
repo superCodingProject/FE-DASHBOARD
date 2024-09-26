@@ -66,7 +66,6 @@ const ListPage = () => {
   };
 
   const searchHandler = async (email) => {
-    console.log("????");
     if (!/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email)) return;
     const { posts } = await fetch(`http://localhost:8080/api/posts/search?author_email=${email}`)
     .then(res => res.json()).catch((error) => {

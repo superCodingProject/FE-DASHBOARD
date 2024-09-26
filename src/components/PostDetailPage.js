@@ -14,31 +14,81 @@ const PostDetailPage = () => {
     author: ''
   });
   const [likesCount, setLikesCount] = useState(0);
+  const [isLiked, setIsLiked] = useState(false);
+
+  // 좋아요 수 가져오기
+  const fetchLikeCount = async (postId) => {
+    try {
+      const response = await fetch(`http://localhost:8080/api/like/${postId}`);
+      const likeData = await response.json();
+      setLikesCount(likeData.likeCount);
+      setIsLiked(likeData.isLiked);
+    } catch (err) {
+      console.error('Failed to fetch like count:', err);
+    }
+  };
+
+  const toggleLike = async () => {
+    try {
+      const email = localStorage.getItem('email');
+      const response = await fetch(`http://localhost:8080/api/like/${post.id}`, {
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        body: JSON.stringify({ email })
+      });
+
+      if (response.ok) {
+        const likeData = await response.json();
+        setLikesCount(prev => prev + (isLiked ? -1 : 1));
+        setIsLiked(!isLiked);
+      }
+    } catch (err) {
+      console.error('Failed to toggle like:', err);
+    }
+  };
 
   async function fetchData(postId) {
     try {
-      const response = await fetch('http://localhost:8080/api/comments');
+      const response = await fetch(`http://localhost:8080/api/comments?postId=${postId}`); // 게시물 ID에 맞게 댓글을 가져옵니다.
       const data = await response.json();
       if (data && data.comments) {
-        setComments(data.comments.filter(c => c?.post_id === postId));
+        setComments(data.comments);
       }
     } catch (err) {
       console.error('Failed to fetch comments:', err);
     }
   }
-  
+
+  // 게시물, 댓글, 좋아요 수 가져오기
   useEffect(() => {
     const postData = JSON.parse(localStorage.getItem('post'));
-    const email = localStorage.getItem('email'); // Get email from local storage
-    if (postData) {
-      setPost(postData);
-      fetchData(postData.id);
-      if (email) {
-        setNewComment(prev => ({ ...prev, author: email })); // Set author to the local email
+    const email = localStorage.getItem('email');
+
+    const fetchPostData = async () => {
+      if (postData) {
+        setPost(postData);
+        await fetchData(postData.id);
+        await fetchLikeCount(postData.id);
+
+        // 좋아요 상태 초기화
+        try {
+          const likeResponse = await fetch(`http://localhost:8080/api/like/${postData.id}`);
+          const likeData = await likeResponse.json();
+          setIsLiked(likeData.isLiked);
+        } catch (err) {
+          console.error('Failed to fetch like status:', err);
+        }
+
+        if (email) {
+          setNewComment(prev => ({ ...prev, author: email }));
+        }
       }
-    }
+    };
+
+    fetchPostData();
   }, []);
 
+  // 게시물 수정
   const handlePostChange = async () => {
     try {
       await fetch(`http://localhost:8080/api/posts/${post.id}`, {
@@ -63,7 +113,7 @@ const PostDetailPage = () => {
       });
       navigate('/');
     } catch (err) {
-      console.error('Failed to delete comment:', err);
+      console.error('Failed to delete post:', err);
     }
   };
 
@@ -75,7 +125,6 @@ const PostDetailPage = () => {
         body: JSON.stringify({ content })
       });
       
-      // 댓글 업데이트 후 상태를 업데이트하여 UI에 반영
       setComments((prevComments) =>
         prevComments.map((comment) =>
           comment.id === id ? { ...comment, content } : comment
@@ -91,7 +140,6 @@ const PostDetailPage = () => {
       await fetch(`http://localhost:8080/api/comments/${id}`, {
         method: 'DELETE',
       });
-      // 댓글이 삭제된 후 화면에서 제거되도록 상태를 업데이트합니다.
       setComments((prevComments) => prevComments.filter((comment) => comment.id !== id));
     } catch (err) {
       console.error('Failed to delete comment:', err);
@@ -107,7 +155,7 @@ const PostDetailPage = () => {
 
   const submitComment = async () => {
     try {
-      await fetch(`http://localhost:8080/api/comments`, {
+      const response = await fetch(`http://localhost:8080/api/comments`, {
         headers: { 'Content-Type': 'application/json' },
         method: 'POST',
         body: JSON.stringify({
@@ -116,8 +164,13 @@ const PostDetailPage = () => {
           post_id: post.id
         })
       });
-      setNewComment({ author: '', content: '' });
-      navigate('/');
+
+      if (response.ok) {
+        const createdComment = await response.json();
+        setComments(prev => [...prev, createdComment]); // 새로 생성된 댓글 추가
+        setNewComment({ author: '', content: '' }); // 입력 필드 초기화
+        navigate("/");
+      }
     } catch (err) {
       console.error('Failed to create comment:', err);
     }
@@ -130,7 +183,7 @@ const PostDetailPage = () => {
       <h2>글 제목</h2>
       <TextField
         id="outlined-basic"
-        label="Outlined"
+        label="제목"
         variant="outlined"
         value={post?.title || ''}
         onChange={(event) =>
@@ -141,7 +194,7 @@ const PostDetailPage = () => {
       <h2>작성자</h2>
       <TextField
         id="outlined-basic"
-        label="Outlined"
+        label="작성자"
         variant="outlined"
         value={post?.author || ''}
         onChange={(event) =>
@@ -151,9 +204,9 @@ const PostDetailPage = () => {
 
       <h2>본문</h2>
       <StyledTextarea
-        aria-label="minimum height"
+        aria-label="본문"
         minRows={3}
-        placeholder="Minimum 3 rows"
+        placeholder="본문을 입력하세요"
         value={post?.content || ''}
         onChange={(event) =>
           setPost((prev) => ({ ...prev, content: event.target.value }))
@@ -177,8 +230,12 @@ const PostDetailPage = () => {
           style={{ backgroundColor: red[500], marginLeft: 10 }} 
           onClick={() => handlePostDelete(post.id)}>삭제
         </CustomButton>
-        <Typography variant="h6" style={{ marginLeft: '10px' }}>
-          {likesCount} 👍 {/* Display likes count */}
+        <CustomButton
+          style={{ backgroundColor: isLiked ? red[500] : blue[500], marginLeft: 10 }}
+          onClick={toggleLike}>{isLiked ? '좋아요 취소' : '좋아요'}
+        </CustomButton>
+        <Typography variant="h6" style={{ marginLeft: 10 }}>
+          좋아요 수: {likesCount}
         </Typography>
       </div>
 
@@ -192,9 +249,6 @@ const PostDetailPage = () => {
               InputProps={{
                 readOnly: true // 읽기 전용 설정
               }} 
-              onChange={(event) =>
-                setNewComment((prev) => ({ ...prev, author: event.target.value }))
-              }
             />
             <h3>댓글 내용</h3>
             <TextField
